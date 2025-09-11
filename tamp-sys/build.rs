@@ -24,15 +24,23 @@ fn arm_none_eabi_sysroot() -> String {
 
 fn main() {
     let target = std::env::var("TARGET").unwrap();
-    let sysroot = arm_none_eabi_sysroot().trim().to_owned();
-    let bindings = bindgen::Builder::default()
+    
+    let mut builder = bindgen::Builder::default()
         .clang_arg(format!("--target={}", target))
-        // .clang_arg("-I/usr/include")
-        // .clang_arg(clang_resource_include())
         .clang_arg("-Itamp/tamp/_c_src")
-        .clang_arg(format!("--sysroot={}", sysroot))
         .header("wrapper.h")
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
+
+    if target.starts_with("thumbv") || target.starts_with("xtensa") {
+        // ARM embedded targets (e.g., thumbv7em-none-eabihf)
+        let sysroot = arm_none_eabi_sysroot().trim().to_owned();
+        builder = builder.clang_arg(format!("--sysroot={}", sysroot));
+    } else {
+        // Desktop targets (Windows, Linux, macOS)
+        builder = builder.clang_arg(clang_resource_include());
+    }
+
+    let bindings = builder
         .generate()
         .expect("Unable to generate bindings");
 
