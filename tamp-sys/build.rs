@@ -29,6 +29,8 @@ fn main() {
         .clang_arg(format!("--target={}", target))
         .clang_arg("-Itamp/tamp/_c_src")
         .header("wrapper.h")
+        .use_core()
+        .ctypes_prefix("::core::ffi")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
 
     if target.starts_with("thumbv") || target.starts_with("xtensa") {
@@ -43,6 +45,16 @@ fn main() {
     let bindings = builder
         .generate()
         .expect("Unable to generate bindings");
+
+    // Build the C library
+    cc::Build::new()
+        .files(&[
+            "tamp/tamp/_c_src/tamp/common.c",
+            "tamp/tamp/_c_src/tamp/compressor.c", 
+            "tamp/tamp/_c_src/tamp/decompressor.c",
+        ])
+        .include("tamp/tamp/_c_src")
+        .compile("tamp");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
