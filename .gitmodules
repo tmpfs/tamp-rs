@@ -1,0 +1,3 @@
+[submodule "tamp-sys/tamp"]
+	path = tamp-sys/tamp
+	url = https://github.com/BrianPugh/tamp.git
