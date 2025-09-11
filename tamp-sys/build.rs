@@ -53,6 +53,7 @@ fn main() {
             "tamp/tamp/_c_src/tamp/compressor.c", 
             "tamp/tamp/_c_src/tamp/decompressor.c",
         ])
+        .flag("-Wno-type-limits")
         .include("tamp/tamp/_c_src")
         .compile("tamp");
 
