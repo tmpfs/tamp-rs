@@ -370,15 +370,33 @@ mod tests {
     #[test]
     fn test_compression_basic() {
         let config = Config::new();
-        let mut compressor = Compressor1K::new(config).unwrap();
+        let mut compressor = Compressor1K::new(config.clone()).unwrap();
         
         let input = b"hello world hello world hello world";
-        let mut output = [0u8; 128];
+        let mut compressed = [0u8; 128];
         
-        let (consumed, written) = compressor.compress_chunk(input, &mut output).unwrap();
-        
-        assert!(consumed > 0);
+        // Compress
+        let (consumed, written) = compressor.compress_chunk(input, &mut compressed).unwrap();
+        assert_eq!(consumed, input.len());
         assert!(written > 0);
         assert!(written < input.len()); // Should compress
+        
+        // Flush any remaining data
+        let flush_written = compressor.flush(&mut compressed[written..], false).unwrap();
+        let total_compressed = written + flush_written;
+        
+        // Decompress - first read header to get proper configuration
+        let (mut decompressor, header_consumed) = Decompressor1K::from_header(&compressed).unwrap();
+        let mut decompressed = [0u8; 128];
+        
+        let (consumed_decomp, written_decomp) = decompressor.decompress_chunk(
+            &compressed[header_consumed..total_compressed], 
+            &mut decompressed
+        ).unwrap();
+        
+        // Verify the data was decompressed correctly
+        assert!(consumed_decomp > 0);
+        assert_eq!(written_decomp, input.len());
+        assert_eq!(&decompressed[..written_decomp], input);
     }
 }
