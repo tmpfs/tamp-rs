@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "tamp",
   "tamp-sys"
 ]
 resolver = "2"

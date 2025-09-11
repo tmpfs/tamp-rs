@@ -209,6 +209,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "tamp"
+version = "0.1.0"
+
+[[package]]
 name = "tamp-sys"
 version = "0.1.0"
 dependencies = [
