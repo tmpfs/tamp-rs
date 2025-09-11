@@ -2,4 +2,4 @@
 
 Rust bindings to the [tamp][] compression library.
 
-[tamp]: https://github.com/BrianPugh
+[tamp]: https://github.com/BrianPugh/tamp
