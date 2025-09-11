@@ -1,6 +1,6 @@
-[package]
-name = "tamp-rs"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+  "tamp-sys"
+]
+resolver = "2"
 
-[dependencies]
