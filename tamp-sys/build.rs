@@ -24,10 +24,7 @@ fn arm_none_eabi_sysroot() -> String {
 
 fn main() {
     let target = std::env::var("TARGET").unwrap();
-
     let sysroot = arm_none_eabi_sysroot().trim().to_owned();
-
-    println!("{}", sysroot);
     let bindings = bindgen::Builder::default()
         .clang_arg(format!("--target={}", target))
         // .clang_arg("-I/usr/include")
