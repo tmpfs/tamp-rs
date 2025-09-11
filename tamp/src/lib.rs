@@ -444,38 +444,72 @@ pub type Decompressor4K = Decompressor<4096>;
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
 
     #[test]
-    fn test_compression_basic() {
-        let config = Config::new();
-        let mut compressor = Compressor1K::new(config.clone()).unwrap();
+    fn test_compression_canterbury_corpus() {
+        use std::fs;
+        use std::path::Path;
+        use std::{println, format, vec};
         
-        let input = b"hello world hello world hello world";
-        let mut compressed = [0u8; 128];
+        let canterbury_dir = Path::new("fixtures/canterbury-corpus/canterbury");
         
-        // Compress
-        let (consumed, written) = compressor.compress_chunk(input, &mut compressed).unwrap();
-        assert_eq!(consumed, input.len());
-        assert!(written > 0);
-        assert!(written < input.len()); // Should compress
-        
-        // Flush any remaining data
-        let flush_written = compressor.flush(&mut compressed[written..], false).unwrap();
-        let total_compressed = written + flush_written;
-        
-        // Decompress - first read header to get proper configuration
-        let (mut decompressor, header_consumed) = Decompressor1K::from_header(&compressed).unwrap();
-        let mut decompressed = [0u8; 128];
-        
-        let (consumed_decomp, written_decomp) = decompressor.decompress_chunk(
-            &compressed[header_consumed..total_compressed], 
-            &mut decompressed
-        ).unwrap();
-        
-        // Verify the data was decompressed correctly
-        assert!(consumed_decomp > 0);
-        assert_eq!(written_decomp, input.len());
-        assert_eq!(&decompressed[..written_decomp], input);
+        // Iterate through all files in Canterbury corpus
+        for entry in fs::read_dir(canterbury_dir).expect("Failed to read Canterbury corpus directory") {
+            let entry = entry.expect("Failed to read directory entry");
+            let path = entry.path();
+            
+            // Skip SHA1SUM file and directories
+            if !path.is_file() || path.file_name().unwrap() == "SHA1SUM" {
+                continue;
+            }
+            
+            println!("Testing compression on: {:?}", path.file_name().unwrap());
+            
+            // Read the file
+            let input = fs::read(&path).expect(&format!("Failed to read file: {:?}", path));
+            
+            // Use larger buffer for larger files
+            let mut compressed = vec![0u8; input.len() + 1024]; // Extra space for headers and worst case
+            
+            let config = Config::new();
+            let mut compressor = Compressor1K::new(config.clone()).unwrap();
+            
+            // Compress
+            let (consumed, written) = compressor.compress_chunk(&input, &mut compressed).unwrap();
+            assert_eq!(consumed, input.len(), "Failed to consume all input for {:?}", path.file_name());
+            assert!(written > 0, "No output written for {:?}", path.file_name());
+            
+            // Flush any remaining data
+            let flush_written = compressor.flush(&mut compressed[written..], false).unwrap();
+            let total_compressed = written + flush_written;
+            
+            // Verify compression actually occurred for most files (some very small files might not compress)
+            if input.len() > 100 {
+                assert!(total_compressed < input.len(), "No compression achieved for {:?}", path.file_name());
+            }
+            
+            // Decompress - first read header to get proper configuration
+            let (mut decompressor, header_consumed) = Decompressor1K::from_header(&compressed).unwrap();
+            let mut decompressed = vec![0u8; input.len() + 100]; // Extra space to be safe
+            
+            let (consumed_decomp, written_decomp) = decompressor.decompress_chunk(
+                &compressed[header_consumed..total_compressed], 
+                &mut decompressed
+            ).unwrap();
+            
+            // Verify the data was decompressed correctly
+            assert!(consumed_decomp > 0, "No input consumed during decompression for {:?}", path.file_name());
+            assert_eq!(written_decomp, input.len(), "Decompressed size mismatch for {:?}", path.file_name());
+            assert_eq!(&decompressed[..written_decomp], &input[..], "Data corruption detected for {:?}", path.file_name());
+            
+            println!("✓ {:?}: {} -> {} bytes ({:.1}% compression)", 
+                path.file_name().unwrap(), 
+                input.len(), 
+                total_compressed,
+                100.0 * (1.0 - total_compressed as f64 / input.len() as f64)
+            );
+        }
     }
 }
