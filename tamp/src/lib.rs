@@ -448,10 +448,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compression_canterbury_corpus() {
+    fn test_corpus() {
+        test_compress_decompress_canterbury_corpus::<256>(Config::new().window_bits(8).unwrap());
+        test_compress_decompress_canterbury_corpus::<512>(Config::new().window_bits(9).unwrap());
+        test_compress_decompress_canterbury_corpus::<1024>(Config::new());
+        test_compress_decompress_canterbury_corpus::<2048>(Config::new().window_bits(11).unwrap());
+        test_compress_decompress_canterbury_corpus::<4096>(Config::new().window_bits(12).unwrap());
+    }
+
+    fn test_compress_decompress_canterbury_corpus<const N: usize>(config: Config) {
         use std::fs;
         use std::path::Path;
-        use std::{println, format, vec};
+        use std::{println, vec};
         
         let canterbury_dir = Path::new("fixtures/canterbury-corpus/canterbury");
         
@@ -465,16 +473,15 @@ mod tests {
                 continue;
             }
             
-            println!("Testing compression on: {:?}", path.file_name().unwrap());
+            println!("Testing compression {} on: {:?}", N, path.file_name().unwrap());
             
             // Read the file
-            let input = fs::read(&path).expect(&format!("Failed to read file: {:?}", path));
+            let input = fs::read(&path).unwrap_or_else(|_| panic!("Failed to read file: {:?}", path));
             
             // Use larger buffer for larger files
             let mut compressed = vec![0u8; input.len() + 1024]; // Extra space for headers and worst case
             
-            let config = Config::new();
-            let mut compressor = Compressor1K::new(config.clone()).unwrap();
+            let mut compressor = Compressor::<N>::new(config.clone()).unwrap();
             
             // Compress
             let (consumed, written) = compressor.compress_chunk(&input, &mut compressed).unwrap();
@@ -491,7 +498,7 @@ mod tests {
             }
             
             // Decompress - first read header to get proper configuration
-            let (mut decompressor, header_consumed) = Decompressor1K::from_header(&compressed).unwrap();
+            let (mut decompressor, header_consumed) = Decompressor::<N>::from_header(&compressed).unwrap();
             let mut decompressed = vec![0u8; input.len() + 100]; // Extra space to be safe
             
             let (consumed_decomp, written_decomp) = decompressor.decompress_chunk(
