@@ -1,3 +1,6 @@
 [submodule "tamp-sys/tamp"]
 	path = tamp-sys/tamp
 	url = https://github.com/BrianPugh/tamp.git
+[submodule "tamp/fixtures/canterbury-corpus"]
+	path = tamp/fixtures/canterbury-corpus
+	url = https://github.com/pfalcon/canterbury-corpus.git
