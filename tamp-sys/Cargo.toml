@@ -3,6 +3,11 @@ name = "tamp-sys"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["compressor", "decompressor"]
+compressor = []
+decompressor = []
+
 [build-dependencies]
 bindgen = "0.72"
 cc = "1.0"

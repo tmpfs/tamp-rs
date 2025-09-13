@@ -46,16 +46,32 @@ fn main() {
         .generate()
         .expect("Unable to generate bindings");
 
-    // Build the C library
-    cc::Build::new()
-        .files(&[
-            "tamp/tamp/_c_src/tamp/common.c",
-            "tamp/tamp/_c_src/tamp/compressor.c", 
-            "tamp/tamp/_c_src/tamp/decompressor.c",
-        ])
+    // Build the C library with size optimizations
+    let mut build = cc::Build::new();
+    let mut files = vec!["tamp/tamp/_c_src/tamp/common.c"];
+    
+    // Only compile what's needed based on features
+    #[cfg(feature = "compressor")]
+    files.push("tamp/tamp/_c_src/tamp/compressor.c");
+    
+    #[cfg(feature = "decompressor")]
+    files.push("tamp/tamp/_c_src/tamp/decompressor.c");
+    
+    build.files(&files)
         .flag("-Wno-type-limits")
-        .include("tamp/tamp/_c_src")
-        .compile("tamp");
+        .include("tamp/tamp/_c_src");
+    
+    // Add size optimization flags for embedded targets
+    if target.starts_with("thumbv") {
+        build
+            .flag("-Os")           // Optimize for size
+            .flag("-ffunction-sections")  // Place functions in separate sections
+            .flag("-fdata-sections")      // Place data in separate sections
+            // .flag("-flto")               // Link-time optimization
+            .flag("-DTAMP_LAZY_MATCHING=0"); // Disable lazy matching to save code size
+    }
+    
+    build.compile("tamp");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings

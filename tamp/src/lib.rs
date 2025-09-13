@@ -457,14 +457,15 @@ mod tests {
     }
 
     fn test_compress_decompress_canterbury_corpus<const N: usize>(config: Config) {
-        use std::fs;
+        use std::fs::{File, read_dir};
+        use std::io::Read;
         use std::path::Path;
         use std::{println, vec};
         
         let canterbury_dir = Path::new("fixtures/canterbury-corpus/canterbury");
         
         // Iterate through all files in Canterbury corpus
-        for entry in fs::read_dir(canterbury_dir).expect("Failed to read Canterbury corpus directory") {
+        for entry in read_dir(canterbury_dir).expect("Failed to read Canterbury corpus directory") {
             let entry = entry.expect("Failed to read directory entry");
             let path = entry.path();
             
@@ -475,47 +476,88 @@ mod tests {
             
             println!("Testing compression {} on: {:?}", N, path.file_name().unwrap());
             
-            // Read the file
-            let input = fs::read(&path).unwrap_or_else(|_| panic!("Failed to read file: {:?}", path));
+            // Open file for reading in chunks
+            let mut file = File::open(&path).unwrap_or_else(|_| panic!("Failed to open file: {:?}", path));
+            let file_size = file.metadata().unwrap().len() as usize;
             
             // Use larger buffer for larger files
-            let mut compressed = vec![0u8; input.len() + 1024]; // Extra space for headers and worst case
-            
+            let mut compressed = vec![0u8; file_size + 1024]; // Extra space for headers and worst case
             let mut compressor = Compressor::<N>::new(config.clone()).unwrap();
             
-            // Compress
-            let (consumed, written) = compressor.compress_chunk(&input, &mut compressed).unwrap();
-            assert_eq!(consumed, input.len(), "Failed to consume all input for {:?}", path.file_name());
-            assert!(written > 0, "No output written for {:?}", path.file_name());
+            // Compress file in 1024-byte chunks
+            let mut total_compressed_size = 0;
+            let mut chunk_buffer = [0u8; 1024];
+            let mut input_data = vec![]; // Keep track of original data for verification
+            
+            loop {
+                let bytes_read = file.read(&mut chunk_buffer).unwrap();
+                if bytes_read == 0 {
+                    break; // End of file
+                }
+                
+                let chunk = &chunk_buffer[..bytes_read];
+                input_data.extend_from_slice(chunk);
+                
+                // Compress this chunk
+                let mut chunk_offset = 0;
+                while chunk_offset < bytes_read {
+                    let (consumed, written) = compressor.compress_chunk(
+                        &chunk[chunk_offset..],
+                        &mut compressed[total_compressed_size..]
+                    ).unwrap();
+                    
+                    chunk_offset += consumed;
+                    total_compressed_size += written;
+                    
+                    // If we didn't consume all the chunk, we need more output space
+                    if consumed == 0 {
+                        panic!("Output buffer too small for compression");
+                    }
+                }
+            }
             
             // Flush any remaining data
-            let flush_written = compressor.flush(&mut compressed[written..], false).unwrap();
-            let total_compressed = written + flush_written;
+            let flush_written = compressor.flush(&mut compressed[total_compressed_size..], false).unwrap();
+            total_compressed_size += flush_written;
+            
+            assert!(total_compressed_size > 0, "No output written for {:?}", path.file_name());
             
             // Verify compression actually occurred for most files (some very small files might not compress)
-            if input.len() > 100 {
-                assert!(total_compressed < input.len(), "No compression achieved for {:?}", path.file_name());
+            if input_data.len() > 100 {
+                assert!(total_compressed_size < input_data.len(), "No compression achieved for {:?}", path.file_name());
             }
             
             // Decompress - first read header to get proper configuration
             let (mut decompressor, header_consumed) = Decompressor::<N>::from_header(&compressed).unwrap();
-            let mut decompressed = vec![0u8; input.len() + 100]; // Extra space to be safe
+            let mut decompressed = vec![0u8; input_data.len() + 100]; // Extra space to be safe
             
-            let (consumed_decomp, written_decomp) = decompressor.decompress_chunk(
-                &compressed[header_consumed..total_compressed], 
-                &mut decompressed
-            ).unwrap();
+            // Decompress in chunks as well
+            let mut compressed_offset = header_consumed;
+            let mut decompressed_offset = 0;
+            
+            while compressed_offset < total_compressed_size && decompressed_offset < input_data.len() {
+                let (consumed_decomp, written_decomp) = decompressor.decompress_chunk(
+                    &compressed[compressed_offset..total_compressed_size], 
+                    &mut decompressed[decompressed_offset..]
+                ).unwrap();
+                
+                if consumed_decomp == 0 && written_decomp == 0 {
+                    break; // No more progress possible
+                }
+                
+                compressed_offset += consumed_decomp;
+                decompressed_offset += written_decomp;
+            }
             
             // Verify the data was decompressed correctly
-            assert!(consumed_decomp > 0, "No input consumed during decompression for {:?}", path.file_name());
-            assert_eq!(written_decomp, input.len(), "Decompressed size mismatch for {:?}", path.file_name());
-            assert_eq!(&decompressed[..written_decomp], &input[..], "Data corruption detected for {:?}", path.file_name());
+            assert_eq!(decompressed_offset, input_data.len(), "Decompressed size mismatch for {:?}", path.file_name());
+            assert_eq!(&decompressed[..decompressed_offset], &input_data[..], "Data corruption detected for {:?}", path.file_name());
             
             println!("✓ {:?}: {} -> {} bytes ({:.1}% compression)", 
                 path.file_name().unwrap(), 
-                input.len(), 
-                total_compressed,
-                100.0 * (1.0 - total_compressed as f64 / input.len() as f64)
+                input_data.len(), 
+                total_compressed_size,
+                100.0 * (1.0 - total_compressed_size as f64 / input_data.len() as f64)
             );
         }
     }

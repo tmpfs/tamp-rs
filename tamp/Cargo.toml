@@ -3,6 +3,12 @@ name = "tamp"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["compressor", "decompressor"]
+compressor = ["tamp-sys/compressor"]
+decompressor = ["tamp-sys/decompressor"]
+
+
 [dependencies]
 tamp-sys = { version = "0.1", path = "../tamp-sys" }
 heapless = "0.8"
