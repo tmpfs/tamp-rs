@@ -2,38 +2,11 @@
 //!
 //! Provides safe, heapless streaming compression and decompression using const generics
 //! for compile-time buffer allocation. Designed for embedded systems without heap allocation.
-//!
-//! # Example
-//!
-//! ```
-//! use tamp::{Compressor1K, Decompressor1K, Config};
-//!
-//! let config = Config::new();
-//! let mut compressor = Compressor1K::new(config.clone()).unwrap();
-//! let mut compressed = [0u8; 128];
-//!
-//! let input = b"hello world";
-//! let (consumed, written) = compressor.compress_chunk(input, &mut compressed).unwrap();
-//! let flush_written = compressor.flush(&mut compressed[written..], false).unwrap();
-//!
-//! let (mut decompressor, header_consumed) = Decompressor1K::from_header(&compressed).unwrap();
-//! let mut decompressed = [0u8; 128];
-//! let (_, written) = decompressor.decompress_chunk(
-//!     &compressed[header_consumed..written + flush_written],
-//!     &mut decompressed
-//! ).unwrap();
-//!
-//! assert_eq!(&decompressed[..written], input);
-//! ```
 #![no_std]
 #![deny(missing_docs)]
 
 use tamp_sys::{
-    TAMP_EXCESS_BITS, TAMP_INPUT_EXHAUSTED, TAMP_INVALID_CONF, TAMP_OK, TAMP_OUTPUT_FULL,
-    TampCompressor, TampConf, TampDecompressor, tamp_compressor_compress_cb, tamp_compressor_flush,
-    tamp_compressor_full, tamp_compressor_init, tamp_compressor_poll, tamp_compressor_sink,
-    tamp_decompressor_decompress_cb, tamp_decompressor_init, tamp_decompressor_read_header,
-    tamp_initialize_dictionary, tamp_res,
+    TAMP_EXCESS_BITS, TAMP_INPUT_EXHAUSTED, TAMP_INVALID_CONF, TAMP_OK, TAMP_OUTPUT_FULL, tamp_res,
 };
 
 #[cfg(feature = "compressor")]

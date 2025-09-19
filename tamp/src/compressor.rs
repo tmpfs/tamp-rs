@@ -1,11 +1,9 @@
 use core::marker::PhantomData;
 use heapless::Vec;
 use tamp_sys::{
-    TAMP_EXCESS_BITS, TAMP_INPUT_EXHAUSTED, TAMP_INVALID_CONF, TAMP_OK, TAMP_OUTPUT_FULL,
-    TampCompressor, TampConf, TampDecompressor, tamp_compressor_compress_cb, tamp_compressor_flush,
+    TampCompressor, TampConf, tamp_compressor_compress_cb, tamp_compressor_flush,
     tamp_compressor_full, tamp_compressor_init, tamp_compressor_poll, tamp_compressor_sink,
-    tamp_decompressor_decompress_cb, tamp_decompressor_init, tamp_decompressor_read_header,
-    tamp_initialize_dictionary, tamp_res,
+    tamp_initialize_dictionary,
 };
 use crate::Error;
 
