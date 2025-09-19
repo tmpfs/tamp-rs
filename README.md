@@ -10,10 +10,14 @@ From the workspace root:
 
 ```
 ```
-cargo test -p tamp
+cargo test -p tamp -- --nocapture
 
 ```
 ```
 
+
+## License
+
+MIT or Apache-2.0
 
 

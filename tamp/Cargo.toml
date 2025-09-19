@@ -2,6 +2,8 @@
 name = "tamp"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Bindings to the tamp compression library"
 
 [features]
 default = ["compressor", "decompressor"]
