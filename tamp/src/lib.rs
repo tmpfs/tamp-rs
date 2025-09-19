@@ -30,11 +30,13 @@
 
 use core::marker::PhantomData;
 use heapless::Vec;
-use tamp_sys::{TampCompressor, TampDecompressor, TampConf, tamp_res,
-    TAMP_OK, TAMP_OUTPUT_FULL, TAMP_INPUT_EXHAUSTED, TAMP_EXCESS_BITS, TAMP_INVALID_CONF,
-    tamp_compressor_init, tamp_compressor_sink, tamp_compressor_poll, tamp_compressor_full,
-    tamp_compressor_flush, tamp_compressor_compress_cb, tamp_decompressor_init,
-    tamp_decompressor_decompress_cb, tamp_decompressor_read_header, tamp_initialize_dictionary};
+use tamp_sys::{
+    TAMP_EXCESS_BITS, TAMP_INPUT_EXHAUSTED, TAMP_INVALID_CONF, TAMP_OK, TAMP_OUTPUT_FULL,
+    TampCompressor, TampConf, TampDecompressor, tamp_compressor_compress_cb, tamp_compressor_flush,
+    tamp_compressor_full, tamp_compressor_init, tamp_compressor_poll, tamp_compressor_sink,
+    tamp_decompressor_decompress_cb, tamp_decompressor_init, tamp_decompressor_read_header,
+    tamp_initialize_dictionary, tamp_res,
+};
 
 /// Errors that can occur during compression or decompression.
 #[derive(Debug)]
@@ -58,14 +60,16 @@ impl Error {
             x if x == TAMP_OUTPUT_FULL as tamp_res => Err(Error::OutputFull),
             x if x == TAMP_INPUT_EXHAUSTED as tamp_res => Err(Error::InputExhausted),
             x if x == TAMP_EXCESS_BITS as tamp_res => Err(Error::ExcessBits),
-            x if x == TAMP_INVALID_CONF as tamp_res => Err(Error::InvalidConfig("Invalid parameters")),
+            x if x == TAMP_INVALID_CONF as tamp_res => {
+                Err(Error::InvalidConfig("Invalid parameters"))
+            }
             _ => Err(Error::InvalidConfig("Unknown error")),
         }
     }
 }
 
 /// Configuration for tamp compression/decompression.
-/// 
+///
 /// Default configuration uses 10-bit window (1KB), 8-bit literals, lazy matching enabled.
 #[derive(Clone)]
 pub struct Config {
@@ -83,9 +87,9 @@ impl Default for Config {
     /// Creates default configuration: 10-bit window (1KB), 8-bit literals, lazy matching enabled.
     fn default() -> Self {
         Self {
-            window_bits: 10,  // 1KB window
+            window_bits: 10, // 1KB window
             literal_bits: 8,
-            lazy_matching: true,
+            lazy_matching: false,
             use_custom_dictionary: false,
         }
     }
@@ -96,7 +100,7 @@ impl Config {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Sets window size in bits (8-15). Window size = 2^bits bytes.
     /// Larger windows provide better compression but use more memory.
     pub fn window_bits(mut self, bits: u8) -> Result<Self, Error> {
@@ -106,7 +110,7 @@ impl Config {
         self.window_bits = bits;
         Ok(self)
     }
-    
+
     /// Sets literal size in bits (5-8). More bits = larger alphabet but less compression.
     pub fn literal_bits(mut self, bits: u8) -> Result<Self, Error> {
         if !(5..=8).contains(&bits) {
@@ -115,19 +119,19 @@ impl Config {
         self.literal_bits = bits;
         Ok(self)
     }
-    
+
     /// Enables lazy matching. Improves compression ~0.5-2% at cost of ~50% more CPU.
     pub fn lazy_matching(mut self, enabled: bool) -> Self {
         self.lazy_matching = enabled;
         self
     }
-    
+
     /// Enables custom dictionary initialization. Dictionary must be provided during construction.
     pub fn custom_dictionary(mut self, enabled: bool) -> Self {
         self.use_custom_dictionary = enabled;
         self
     }
-    
+
     fn to_c_config(&self) -> TampConf {
         let mut conf = TampConf {
             _bitfield_align_1: [],
@@ -139,7 +143,7 @@ impl Config {
         // Note: lazy_matching not available in current bindings
         conf
     }
-    
+
     /// Returns window size in bytes (2^window_bits).
     pub fn window_size(&self) -> usize {
         1usize << self.window_bits
@@ -147,10 +151,10 @@ impl Config {
 }
 
 /// Streaming compressor with heapless window buffer.
-/// 
+///
 /// `N` is the window buffer size in bytes and must equal 2^window_bits.
 /// Use type aliases like `Compressor1K` for convenience.
-/// 
+///
 /// Memory usage: ~N + 64 bytes (window + struct overhead).
 pub struct Compressor<const N: usize> {
     inner: TampCompressor,
@@ -164,18 +168,20 @@ impl<const N: usize> Compressor<N> {
     pub fn new(config: Config) -> Result<Self, Error> {
         Self::with_dictionary(config, None)
     }
-    
+
     /// Creates a compressor with optional dictionary initialization.
     /// Dictionary improves compression when data has predictable patterns.
     pub fn with_dictionary(config: Config, dictionary: Option<&[u8]>) -> Result<Self, Error> {
         let expected_size = config.window_size();
         if N != expected_size {
-            return Err(Error::InvalidConfig("Buffer size N must equal 2^window_bits"));
+            return Err(Error::InvalidConfig(
+                "Buffer size N must equal 2^window_bits",
+            ));
         }
-        
+
         let mut window = Vec::new();
         window.resize(N, 0).map_err(|_| Error::BufferTooSmall)?;
-        
+
         // Initialize dictionary if provided
         if let Some(dict) = dictionary {
             if config.use_custom_dictionary {
@@ -192,35 +198,41 @@ impl<const N: usize> Compressor<N> {
                 }
             }
         } else if config.use_custom_dictionary {
-            return Err(Error::InvalidConfig("Custom dictionary enabled but none provided"));
+            return Err(Error::InvalidConfig(
+                "Custom dictionary enabled but none provided",
+            ));
         }
-        
+
         let mut compressor = Self {
             inner: unsafe { core::mem::zeroed() },
             window,
             _marker: PhantomData,
         };
-        
+
         let c_config = config.to_c_config();
         let result = unsafe {
             tamp_compressor_init(
                 &mut compressor.inner,
                 &c_config,
-                compressor.window.as_mut_ptr()
+                compressor.window.as_mut_ptr(),
             )
         };
-        
+
         Error::from_tamp_res(result)?;
         Ok(compressor)
     }
-    
+
     /// Compresses input data into output buffer.
     /// Returns (input_consumed, output_written). May not consume all input if output is full.
     /// Call repeatedly until all input is consumed.
-    pub fn compress_chunk(&mut self, input: &[u8], output: &mut [u8]) -> Result<(usize, usize), Error> {
+    pub fn compress_chunk(
+        &mut self,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<(usize, usize), Error> {
         let mut input_consumed = 0;
         let mut output_written = 0;
-        
+
         let result = unsafe {
             tamp_compressor_compress_cb(
                 &mut self.inner,
@@ -228,32 +240,27 @@ impl<const N: usize> Compressor<N> {
                 output.len(),
                 &mut output_written,
                 input.as_ptr(),
-                input.len(), 
+                input.len(),
                 &mut input_consumed,
-                None,  // No callback
-                core::ptr::null_mut(),  // No user data
+                None,                  // No callback
+                core::ptr::null_mut(), // No user data
             )
         };
-        
+
         Error::from_tamp_res(result)?;
         Ok((input_consumed, output_written))
     }
-    
+
     /// Low-level: sinks up to 16 bytes into internal buffer.
     /// Use with `poll()` for fine-grained control. Most users should use `compress_chunk()`.
     pub fn sink(&mut self, input: &[u8]) -> usize {
         let mut consumed = 0;
         unsafe {
-            tamp_compressor_sink(
-                &mut self.inner,
-                input.as_ptr(),
-                input.len(),
-                &mut consumed,
-            );
+            tamp_compressor_sink(&mut self.inner, input.as_ptr(), input.len(), &mut consumed);
         }
         consumed
     }
-    
+
     /// Low-level: polls internal buffer for compressed data.
     /// Use with `sink()` for fine-grained control. Most users should use `compress_chunk()`.
     pub fn poll(&mut self, output: &mut [u8]) -> Result<usize, Error> {
@@ -266,23 +273,23 @@ impl<const N: usize> Compressor<N> {
                 &mut output_written,
             )
         };
-        
+
         Error::from_tamp_res(result)?;
         Ok(output_written)
     }
-    
+
     /// Returns true if internal input buffer is full (16 bytes).
     /// When full, call `poll()` to process buffered data.
     pub fn is_full(&self) -> bool {
         unsafe { tamp_compressor_full(&self.inner as *const _ as *mut _) }
     }
-    
+
     /// Flushes remaining data from internal buffers.
     /// `write_token`: true to continue using compressor, false for final flush.
     /// Must be called at end of compression to ensure all data is output.
     pub fn flush(&mut self, output: &mut [u8], write_token: bool) -> Result<usize, Error> {
         let mut output_written = 0;
-        
+
         let result = unsafe {
             tamp_compressor_flush(
                 &mut self.inner,
@@ -292,17 +299,17 @@ impl<const N: usize> Compressor<N> {
                 write_token,
             )
         };
-        
+
         Error::from_tamp_res(result)?;
         Ok(output_written)
     }
 }
 
 /// Streaming decompressor with heapless window buffer.
-/// 
+///
 /// `N` is the window buffer size in bytes and must equal 2^window_bits.
 /// Use type aliases like `Decompressor1K` for convenience.
-/// 
+///
 /// Memory usage: ~N + 32 bytes (window + struct overhead).
 pub struct Decompressor<const N: usize> {
     inner: TampDecompressor,
@@ -316,50 +323,54 @@ impl<const N: usize> Decompressor<N> {
     pub fn new(config: Config) -> Result<Self, Error> {
         Self::with_dictionary(config, None)
     }
-    
+
     /// Creates a decompressor with optional dictionary initialization.
     /// Dictionary must match the one used during compression.
     pub fn with_dictionary(config: Config, dictionary: Option<&[u8]>) -> Result<Self, Error> {
         let expected_size = config.window_size();
         if N != expected_size {
-            return Err(Error::InvalidConfig("Buffer size N must equal 2^window_bits"));
+            return Err(Error::InvalidConfig(
+                "Buffer size N must equal 2^window_bits",
+            ));
         }
-        
+
         let mut window = Vec::new();
         window.resize(N, 0).map_err(|_| Error::BufferTooSmall)?;
-        
+
         // Initialize dictionary if provided
-        if let Some(dict) = dictionary && config.use_custom_dictionary {
-                let copy_len = dict.len().min(N);
-                window[..copy_len].copy_from_slice(&dict[..copy_len]);
+        if let Some(dict) = dictionary
+            && config.use_custom_dictionary
+        {
+            let copy_len = dict.len().min(N);
+            window[..copy_len].copy_from_slice(&dict[..copy_len]);
         }
-        
+
         let mut decompressor = Self {
             inner: unsafe { core::mem::zeroed() },
             window,
             _marker: PhantomData,
         };
-        
+
         let c_config = config.to_c_config();
         let result = unsafe {
             tamp_decompressor_init(
                 &mut decompressor.inner,
                 &c_config,
-                decompressor.window.as_mut_ptr()
+                decompressor.window.as_mut_ptr(),
             )
         };
-        
+
         Error::from_tamp_res(result)?;
         Ok(decompressor)
     }
-    
+
     /// Creates decompressor by reading configuration from compressed stream header.
     /// Returns (decompressor, bytes_consumed_from_input).
     /// Buffer size N must match the window size found in header.
     pub fn from_header(input: &[u8]) -> Result<(Self, usize), Error> {
         let mut conf = unsafe { core::mem::zeroed::<TampConf>() };
         let mut input_consumed = 0;
-        
+
         let result = unsafe {
             tamp_decompressor_read_header(
                 &mut conf,
@@ -368,32 +379,36 @@ impl<const N: usize> Decompressor<N> {
                 &mut input_consumed,
             )
         };
-        
+
         Error::from_tamp_res(result)?;
-        
+
         let config = Config {
             window_bits: conf.window() as u8,
             literal_bits: conf.literal() as u8,
             use_custom_dictionary: conf.use_custom_dictionary() != 0,
             lazy_matching: false, // Not used for decompression
         };
-        
+
         let expected_size = config.window_size();
         if N != expected_size {
             return Err(Error::InvalidConfig("Buffer size N doesn't match header"));
         }
-        
+
         let decompressor = Self::new(config)?;
         Ok((decompressor, input_consumed))
     }
-    
+
     /// Decompresses input data into output buffer.
     /// Returns (input_consumed, output_written). May not consume all input or fill all output.
     /// Call repeatedly until input is exhausted or output is filled.
-    pub fn decompress_chunk(&mut self, input: &[u8], output: &mut [u8]) -> Result<(usize, usize), Error> {
+    pub fn decompress_chunk(
+        &mut self,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<(usize, usize), Error> {
         let mut input_consumed = 0;
         let mut output_written = 0;
-        
+
         let result = unsafe {
             tamp_decompressor_decompress_cb(
                 &mut self.inner,
@@ -403,16 +418,17 @@ impl<const N: usize> Decompressor<N> {
                 input.as_ptr(),
                 input.len(),
                 &mut input_consumed,
-                None,  // No callback
-                core::ptr::null_mut(),  // No user data
+                None,                  // No callback
+                core::ptr::null_mut(), // No user data
             )
         };
-        
+
         // For decompressor, INPUT_EXHAUSTED and OUTPUT_FULL are normal conditions
         match result {
-            x if x == TAMP_OK as tamp_res || 
-                 x == TAMP_OUTPUT_FULL as tamp_res || 
-                 x == TAMP_INPUT_EXHAUSTED as tamp_res => {
+            x if x == TAMP_OK as tamp_res
+                || x == TAMP_OUTPUT_FULL as tamp_res
+                || x == TAMP_INPUT_EXHAUSTED as tamp_res =>
+            {
                 Ok((input_consumed, output_written))
             }
             _ => Error::from_tamp_res(result).map(|_| (input_consumed, output_written)),
@@ -446,6 +462,8 @@ pub type Decompressor4K = Decompressor<4096>;
 mod tests {
     extern crate std;
     use super::*;
+    use std::borrow::ToOwned;
+    use std::format;
 
     #[test]
     fn test_corpus() {
@@ -457,108 +475,193 @@ mod tests {
     }
 
     fn test_compress_decompress_canterbury_corpus<const N: usize>(config: Config) {
-        use std::fs::{File, read_dir};
-        use std::io::Read;
+        use std::fs::{File, OpenOptions, create_dir_all, read_dir, remove_file};
+        use std::io::{BufReader, BufWriter, Read, Write};
         use std::path::Path;
         use std::{println, vec};
-        
+
         let canterbury_dir = Path::new("fixtures/canterbury-corpus/canterbury");
-        
+        let target_dir = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".to_owned());
+        let target_path = Path::new(&target_dir);
+        create_dir_all(target_path).expect("Failed to create target directory");
+
         // Iterate through all files in Canterbury corpus
         for entry in read_dir(canterbury_dir).expect("Failed to read Canterbury corpus directory") {
             let entry = entry.expect("Failed to read directory entry");
             let path = entry.path();
-            
+
             // Skip SHA1SUM file and directories
             if !path.is_file() || path.file_name().unwrap() == "SHA1SUM" {
                 continue;
             }
-            
-            println!("Testing compression {} on: {:?}", N, path.file_name().unwrap());
-            
+
+            println!(
+                "Testing compression {} on: {:?}",
+                N,
+                path.file_name().unwrap()
+            );
+
             // Open file for reading in chunks
-            let mut file = File::open(&path).unwrap_or_else(|_| panic!("Failed to open file: {:?}", path));
-            let file_size = file.metadata().unwrap().len() as usize;
-            
-            // Use larger buffer for larger files
-            let mut compressed = vec![0u8; file_size + 1024]; // Extra space for headers and worst case
+            let mut file =
+                File::open(&path).unwrap_or_else(|_| panic!("Failed to open file: {:?}", path));
+            // Create compressed output file in target directory
+            let compressed_filename = format!(
+                "test_compressed_{}_{}.tamp",
+                path.file_name().unwrap().to_string_lossy(),
+                N
+            );
+            let compressed_path = target_path.join(compressed_filename);
+            let compressed_file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&compressed_path)
+                .unwrap_or_else(|_| {
+                    panic!("Failed to create compressed file: {:?}", compressed_path)
+                });
+            let mut compressed_writer = BufWriter::new(compressed_file);
             let mut compressor = Compressor::<N>::new(config.clone()).unwrap();
-            
+
             // Compress file in 1024-byte chunks
             let mut total_compressed_size = 0;
             let mut chunk_buffer = [0u8; 1024];
+            let mut output_buffer = [0u8; 2048];
             let mut input_data = vec![]; // Keep track of original data for verification
-            
+
             loop {
                 let bytes_read = file.read(&mut chunk_buffer).unwrap();
                 if bytes_read == 0 {
                     break; // End of file
                 }
-                
+
                 let chunk = &chunk_buffer[..bytes_read];
                 input_data.extend_from_slice(chunk);
-                
+
                 // Compress this chunk
                 let mut chunk_offset = 0;
                 while chunk_offset < bytes_read {
-                    let (consumed, written) = compressor.compress_chunk(
-                        &chunk[chunk_offset..],
-                        &mut compressed[total_compressed_size..]
-                    ).unwrap();
-                    
+                    let (consumed, written) = compressor
+                        .compress_chunk(&chunk[chunk_offset..], &mut output_buffer)
+                        .unwrap();
+
+                    if written > 0 {
+                        compressed_writer
+                            .write_all(&output_buffer[..written])
+                            .unwrap();
+                        total_compressed_size += written;
+                    }
+
                     chunk_offset += consumed;
-                    total_compressed_size += written;
-                    
-                    // If we didn't consume all the chunk, we need more output space
+
                     if consumed == 0 {
                         panic!("Output buffer too small for compression");
                     }
                 }
             }
-            
+
             // Flush any remaining data
-            let flush_written = compressor.flush(&mut compressed[total_compressed_size..], false).unwrap();
-            total_compressed_size += flush_written;
-            
-            assert!(total_compressed_size > 0, "No output written for {:?}", path.file_name());
-            
+            let flush_written = compressor.flush(&mut output_buffer, false).unwrap();
+            if flush_written > 0 {
+                compressed_writer
+                    .write_all(&output_buffer[..flush_written])
+                    .unwrap();
+                total_compressed_size += flush_written;
+            }
+            compressed_writer.flush().unwrap();
+            drop(compressed_writer);
+
+            assert!(
+                total_compressed_size > 0,
+                "No output written for {:?}",
+                path.file_name()
+            );
+
             // Verify compression actually occurred for most files (some very small files might not compress)
             if input_data.len() > 100 {
-                assert!(total_compressed_size < input_data.len(), "No compression achieved for {:?}", path.file_name());
+                assert!(
+                    total_compressed_size < input_data.len(),
+                    "No compression achieved for {:?}",
+                    path.file_name()
+                );
             }
-            
-            // Decompress - first read header to get proper configuration
-            let (mut decompressor, header_consumed) = Decompressor::<N>::from_header(&compressed).unwrap();
-            let mut decompressed = vec![0u8; input_data.len() + 100]; // Extra space to be safe
-            
-            // Decompress in chunks as well
-            let mut compressed_offset = header_consumed;
+
+            // Decompress - first read header from file to get proper configuration
+            let compressed_file = File::open(&compressed_path).unwrap_or_else(|_| {
+                panic!("Failed to open compressed file: {:?}", compressed_path)
+            });
+            let mut compressed_reader = BufReader::new(compressed_file);
+
+            // Read initial chunk to get header
+            let mut header_buffer = [0u8; 64];
+            compressed_reader.read_exact(&mut header_buffer).unwrap();
+            let (mut decompressor, header_consumed) =
+                Decompressor::<N>::from_header(&header_buffer).unwrap();
+
+            let mut decompressed = vec![0u8; input_data.len() + 100];
             let mut decompressed_offset = 0;
-            
-            while compressed_offset < total_compressed_size && decompressed_offset < input_data.len() {
-                let (consumed_decomp, written_decomp) = decompressor.decompress_chunk(
-                    &compressed[compressed_offset..total_compressed_size], 
-                    &mut decompressed[decompressed_offset..]
-                ).unwrap();
-                
-                if consumed_decomp == 0 && written_decomp == 0 {
-                    break; // No more progress possible
+            let mut compressed_input_buffer = [0u8; 1024];
+
+            // Position reader after header
+            let mut compressed_reader = BufReader::new(File::open(&compressed_path).unwrap());
+            compressed_reader
+                .read_exact(&mut vec![0u8; header_consumed])
+                .unwrap();
+
+            // Decompress in chunks from file
+            loop {
+                let bytes_read = compressed_reader
+                    .read(&mut compressed_input_buffer)
+                    .unwrap();
+                if bytes_read == 0 {
+                    break;
                 }
-                
-                compressed_offset += consumed_decomp;
-                decompressed_offset += written_decomp;
+
+                let mut input_offset = 0;
+                while input_offset < bytes_read && decompressed_offset < input_data.len() {
+                    let (consumed_decomp, written_decomp) = decompressor
+                        .decompress_chunk(
+                            &compressed_input_buffer[input_offset..bytes_read],
+                            &mut decompressed[decompressed_offset..],
+                        )
+                        .unwrap();
+
+                    if consumed_decomp == 0 && written_decomp == 0 {
+                        break;
+                    }
+
+                    input_offset += consumed_decomp;
+                    decompressed_offset += written_decomp;
+                }
+
+                if decompressed_offset >= input_data.len() {
+                    break;
+                }
             }
-            
+
             // Verify the data was decompressed correctly
-            assert_eq!(decompressed_offset, input_data.len(), "Decompressed size mismatch for {:?}", path.file_name());
-            assert_eq!(&decompressed[..decompressed_offset], &input_data[..], "Data corruption detected for {:?}", path.file_name());
-            
-            println!("✓ {:?}: {} -> {} bytes ({:.1}% compression)", 
-                path.file_name().unwrap(), 
-                input_data.len(), 
+            assert_eq!(
+                decompressed_offset,
+                input_data.len(),
+                "Decompressed size mismatch for {:?}",
+                path.file_name()
+            );
+            assert_eq!(
+                &decompressed[..decompressed_offset],
+                &input_data[..],
+                "Data corruption detected for {:?}",
+                path.file_name()
+            );
+
+            println!(
+                "✓ {:?}: {} -> {} bytes ({:.1}% compression)",
+                path.file_name().unwrap(),
+                input_data.len(),
                 total_compressed_size,
                 100.0 * (1.0 - total_compressed_size as f64 / input_data.len() as f64)
             );
+
+            // Clean up temporary compressed file
+            let _ = remove_file(&compressed_path);
         }
     }
 }
